@@ -624,9 +624,120 @@
   }
 
   /* ============================================================
-     听书：引导页。朗读在各章内由 Web Speech API 完成。
+     听书：HTMLAudio 连续播放
      ============================================================ */
-  /* 无预生成播放器，listen 页仅作引导，静态内容足够 */
+  if (PAGE === 'listen') {
+    const PL = window.POW_AUDIO || [];
+    const list = $('#tracklist');
+    const au = new Audio();
+    au.preload = 'metadata';
+    let cur = 0, speeds = [1, 1.25, 1.5, 2, 0.75], si = 0;
+
+    const fmt = s => {
+      s = Math.max(0, Math.floor(s || 0));
+      return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    };
+    const paintList = () => {
+      $$('.track', list).forEach((li, i) => {
+        li.classList.toggle('cur', i === cur);
+        $('.tstate', li).textContent = i === cur && !au.paused ? '♪' : (store.get('audio:done:' + (i + 1), false) ? '✓' : '');
+      });
+    };
+    const paintPlayer = () => {
+      if (!PL[cur]) return;
+      $('#pl-t').textContent = '第 ' + PL[cur].n + ' 段 · ' + PL[cur].ch;
+      $('#pl-cur').textContent = fmt(au.currentTime);
+      $('#pl-dur').textContent = fmt(PL[cur].sec || au.duration);
+      $('#pl-play').innerHTML = au.paused ? '&#9654;' : '&#10074;&#10074;';
+      $('#pl-play').setAttribute('aria-label', au.paused ? '播放' : '暂停');
+      const p = au.duration ? (au.currentTime / au.duration) : 0;
+      const seek = $('#pl-seek');
+      if (document.activeElement !== seek) seek.value = Math.round(p * 1000);
+      const text = $('#pl-text');
+      if (PL[cur].href) text.href = PL[cur].href;
+    };
+    const load = (i, autoplay, from) => {
+      if (!PL.length) return;
+      cur = (i + PL.length) % PL.length;
+      const p = PL[cur];
+      au.src = 'audio/' + String(p.n).padStart(2, '0') + '.mp3';
+      au.playbackRate = speeds[si];
+      store.set('audio:last', p.n);
+      if (from != null) {
+        const seekTo = () => { try { au.currentTime = from } catch (e) { } };
+        if (au.readyState >= 1) seekTo(); else au.addEventListener('loadedmetadata', seekTo, { once: true });
+      }
+      paintList(); paintPlayer();
+      if (autoplay) au.play().then(paintPlayer).catch(() => toast('点一下播放键开始'));
+    };
+    const playAt = i => { load(i, true); };
+    const next = () => { store.set('audio:done:' + PL[cur].n, true); playAt(cur + 1) };
+    const prev = () => { if (au.currentTime > 4) { au.currentTime = 0; paintPlayer() } else playAt(cur - 1) };
+
+    if (list) {
+      list.addEventListener('click', e => {
+        const li = e.target.closest('.track');
+        if (li) playAt(+li.dataset.n - 1);
+      });
+    }
+    $('#pl-play').onclick = () => { if (au.paused) au.play().catch(() => { }); else au.pause() };
+    $('#pl-next').onclick = next;
+    $('#pl-prev').onclick = prev;
+    $('#pl-spd').onclick = () => {
+      si = (si + 1) % speeds.length;
+      au.playbackRate = speeds[si];
+      $('#pl-spd').textContent = speeds[si].toFixed(2).replace(/0$/, '').replace(/\.$/, '') + '×';
+      store.set('audio:spd', speeds[si]);
+    };
+    $('#pl-seek').addEventListener('input', e => {
+      if (au.duration) { au.currentTime = au.duration * (+e.target.value / 1000); paintPlayer() }
+    });
+    au.addEventListener('timeupdate', () => {
+      paintPlayer();
+      if (PL[cur]) store.set('audio:pos:' + PL[cur].n, Math.floor(au.currentTime));
+    });
+    au.addEventListener('play', () => { paintList(); paintPlayer(); setMedia('playing') });
+    au.addEventListener('pause', () => { paintList(); paintPlayer(); setMedia('paused') });
+    au.addEventListener('ended', next);
+    au.addEventListener('error', () => toast('这段音频没能载入，检查网络后重试'));
+
+    function setMedia(state) {
+      if (!('mediaSession' in navigator)) return;
+      const p = PL[cur]; if (!p) return;
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: '第 ' + p.n + ' 段 · ' + p.ch, artist: '埃克哈特·托利', album: '当下的力量'
+        });
+        navigator.mediaSession.playbackState = state;
+      } catch (e) { }
+    }
+    if ('mediaSession' in navigator) {
+      const handlers = {
+        play: () => au.play().catch(() => { }),
+        pause: () => au.pause(),
+        previoustrack: prev,
+        nexttrack: next,
+        seekto: d => { if (au.duration && d.seekTime != null) au.currentTime = Math.min(au.duration, d.seekTime) },
+      };
+      for (const k in handlers) { try { navigator.mediaSession.setActionHandler(k, handlers[k]) } catch (e) { } }
+    }
+
+    const savedSpd = store.get('audio:spd', 1), spi = speeds.indexOf(savedSpd);
+    if (spi >= 0) si = spi;
+    $('#pl-spd').textContent = speeds[si] + '×';
+
+    const q = new URLSearchParams(location.search).get('n');
+    const want = q ? +q : store.get('audio:last', 1);
+    const wi = Math.max(0, PL.findIndex(p => p.n === want));
+    const pos = store.get('audio:pos:' + (PL[wi] ? PL[wi].n : 1), 0) || 0;
+    load(wi, false, pos > 5 ? pos : null);
+
+    $('#play-first').onclick = () => { store.set('audio:done:', 0); playAt(0) };
+    $('#play-cont').onclick = () => { if (au.paused) au.play().catch(() => { }); paintPlayer() };
+    const tc = $('#to-contents');
+    if (tc) tc.onclick = () => { location.href = 'index.html' };
+    if (!PL.length) { $('#player').hidden = true }
+  }
 
   /* ---------- 小工具 ---------- */
   function esc(s) {
