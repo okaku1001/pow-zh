@@ -660,7 +660,7 @@
       if (!PL.length) return;
       cur = (i + PL.length) % PL.length;
       const p = PL[cur];
-      au.src = 'audio/' + String(p.n).padStart(2, '0') + '.mp3';
+      au.src = p.src || 'audio/' + String(p.n).padStart(3, '0') + '.mp3';
       au.playbackRate = speeds[si];
       store.set('audio:last', p.n);
       if (from != null) {
@@ -680,7 +680,12 @@
         if (li) playAt(+li.dataset.n - 1);
       });
     }
-    $('#pl-play').onclick = () => { if (au.paused) au.play().catch(() => { }); else au.pause() };
+    $('#pl-play').onclick = () => {
+      if (au.paused) {
+        if (!au.src) load(cur, true);
+        else au.play().catch(() => toast('播放被浏览器拦住了，再点一次播放键'));
+      } else au.pause();
+    };
     $('#pl-next').onclick = next;
     $('#pl-prev').onclick = prev;
     $('#pl-spd').onclick = () => {
@@ -699,7 +704,7 @@
     au.addEventListener('play', () => { paintList(); paintPlayer(); setMedia('playing') });
     au.addEventListener('pause', () => { paintList(); paintPlayer(); setMedia('paused') });
     au.addEventListener('ended', next);
-    au.addEventListener('error', () => toast('这段音频没能载入，检查网络后重试'));
+    au.addEventListener('error', () => toast('这段音频没能载入：' + (au.src ? au.src.split('/').pop() : '无地址') + '，检查网络后重试'));
 
     function setMedia(state) {
       if (!('mediaSession' in navigator)) return;
@@ -733,7 +738,10 @@
     load(wi, false, pos > 5 ? pos : null);
 
     $('#play-first').onclick = () => { store.set('audio:done:', 0); playAt(0) };
-    $('#play-cont').onclick = () => { if (au.paused) au.play().catch(() => { }); paintPlayer() };
+    $('#play-cont').onclick = () => {
+      if (au.paused) au.play().catch(() => toast('播放被浏览器拦住了，再点一次播放键'));
+      paintPlayer()
+    };
     const tc = $('#to-contents');
     if (tc) tc.onclick = () => { location.href = 'index.html' };
     if (!PL.length) { $('#player').hidden = true }
